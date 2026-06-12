@@ -1,0 +1,30 @@
+{
+  "name": "atlas-mcp",
+  "version": "0.1.0",
+  "description": "Atlas MCP server — connect any AI coding agent (Cursor, Claude Code, Windsurf…) to your team's Atlas knowledge hub. Pull prompts/docs/secrets as context; passively capture what the AI builds.",
+  "repository": "github:TheDivyanshShukla/atlas-mcp",
+  "type": "module",
+  "bin": {
+    "atlas-mcp": "dist/cli.js",
+    "atlas": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "files": ["dist", "src", "tsconfig.json"],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0"
+  },
+  "engines": { "node": ">=18" },
+  "keywords": ["mcp", "model-context-protocol", "atlas", "ai-agents", "cursor", "claude-code"],
+  "license": "UNLICENSED"
+}
