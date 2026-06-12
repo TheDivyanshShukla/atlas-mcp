@@ -75,12 +75,37 @@ export async function runServer() {
     async () => ({ content: [{ type: "text", text: JSON.stringify({ ...me, boundProject }, null, 2) }] }),
   );
 
+  if (can("projects:read", "context")) {
+    server.registerTool(
+      "atlas_list_projects",
+      { description: "List Atlas projects this key can access (id + name). projectId on other tools accepts either.", inputSchema: {} },
+      async () => {
+        const r = await client.get<{ projects: { id: string; name: string; role: string }[] }>("/api/v1/projects", { cache: false });
+        return { content: [{ type: "text", text: JSON.stringify(r, null, 2) }] };
+      },
+    );
+  }
+
+  if (can("projects:write", "write") && !readOnly) {
+    server.registerTool(
+      "atlas_create_project",
+      {
+        description: "Create a new Atlas project (same as `atlas .` when the project doesn't exist).",
+        inputSchema: { name: z.string(), description: z.string().optional() },
+      },
+      async ({ name, description }) => {
+        const r = await client.post<{ id: string; name: string }>("/api/v1/projects", { name, description });
+        return { content: [{ type: "text", text: JSON.stringify(r, null, 2) }] };
+      },
+    );
+  }
+
   if (can("prompts:read", "context")) {
     server.registerTool(
       "atlas_context",
       {
         description: "Load the project's approved prompts + recent docs in one call (use at task start).",
-        inputSchema: { projectId: z.string().optional() },
+        inputSchema: { projectId: z.string().optional().describe("project name or UUID; defaults to .atlas binding") },
       },
       async ({ projectId: pid }) => {
         const id = pid ?? projectId;
@@ -140,10 +165,16 @@ export async function runServer() {
           prompt: z.string().optional(),
           files: z.array(z.string()).optional(),
           branch: z.string().optional(),
+          projectId: z.string().optional().describe("project name or UUID; defaults to .atlas binding"),
         },
       },
-      async ({ summary, prompt, files, branch }) => {
-        await client.post("/api/v1/activity", { projectId, client: "mcp", kind: "session", summary, prompt, files, branch }, { queue: true });
+      async ({ summary, prompt, files, branch, projectId: pid }) => {
+        let resolved = projectId;
+        if (pid) {
+          resolved =
+            me.projects.find((p) => p.id === pid || p.name.toLowerCase() === pid.toLowerCase())?.id ?? pid;
+        }
+        await client.post("/api/v1/activity", { projectId: resolved, client: "mcp", kind: "session", summary, prompt, files, branch }, { queue: true });
         return { content: [{ type: "text", text: "Logged to Atlas activity." }] };
       },
     );

@@ -155,10 +155,21 @@ async function init() {
     const key = arg("key") || process.env.ATLAS_MCP_KEY;
     const folder = process.cwd().split(/[\\/]/).filter(Boolean).pop() || "general";
     const baseUrl = (arg("base-url") || process.env.ATLAS_BASE_URL || "https://atlas.naravirtual.in").replace(/\/$/, "");
-    const project = await resolveProject(baseUrl, key, folder);
-    // .atlas — committed, no secrets. Holds the project binding + how the agent should behave here.
     const dotAtlas = join(process.cwd(), ".atlas");
     const existing = existsSync(dotAtlas) ? readJson(dotAtlas) : {};
+    const flagProject = arg("project");
+    let project;
+    if (flagProject) {
+        project = flagProject;
+    }
+    else if (typeof existing.project === "string" && existing.project.trim()) {
+        project = existing.project;
+        out(`\nKeeping existing .atlas binding: ${project} (use atlas . --project <name> to change)`);
+    }
+    else {
+        project = await resolveProject(baseUrl, key, folder);
+    }
+    // .atlas — committed, no secrets. Holds the project binding + how the agent should behave here.
     writeJson(dotAtlas, {
         project,
         autoCapture: existing.autoCapture ?? true,
