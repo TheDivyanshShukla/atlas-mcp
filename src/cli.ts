@@ -26,10 +26,26 @@ function writeJson(p: string, data: unknown) {
   writeFileSync(p, JSON.stringify(data, null, 2) + "\n");
 }
 
-// Distributed from the public GitHub repo — no npm publish needed. `-p <pkg> atlas-mcp` picks the
-// server bin unambiguously; npx fetches+runs (zero permanent install).
+// Install once globally: bun install -g github:TheDivyanshShukla/atlas-mcp
 const GITHUB_PKG = "github:TheDivyanshShukla/atlas-mcp";
-const SERVER_ENTRY = { command: "npx", args: ["-y", "-p", GITHUB_PKG, "atlas-mcp"] };
+const SERVER_ENTRY = { command: "atlas-mcp", args: [] as string[] };
+
+function hasGlobalCli(name: string): boolean {
+  try {
+    const probe = process.platform === "win32" ? `where ${name}` : `command -v ${name}`;
+    execSync(probe, { stdio: ["ignore", "pipe", "ignore"], shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ensureGlobalInstall() {
+  if (hasGlobalCli("atlas-mcp")) return;
+  out(`\n⚠ atlas-mcp is not on PATH. Install globally once, then re-run:\n`);
+  out(`  bun install -g ${GITHUB_PKG}`);
+  out(`  npm install -g ${GITHUB_PKG}\n`);
+}
 
 /** Write the Atlas MCP server into each detected agent's config. */
 function writeAgentConfigs(baseUrl: string) {
@@ -155,6 +171,8 @@ async function init() {
   });
   out(`\nWrote .atlas (project: ${project}, write access on) — safe to commit.`);
 
+  ensureGlobalInstall();
+
   out(`\nAdding the Atlas MCP to your agents:`);
   writeAgentConfigs(baseUrl);
 
@@ -165,7 +183,7 @@ async function init() {
   } else {
     out(`  Key detected in env. You're set.`);
   }
-  out(`  3. (Claude Code) capture every prompt automatically:  npx @nara/atlas-mcp hooks install`);
+  out(`  3. (Claude Code) capture every prompt automatically:  atlas hooks install`);
   out(`  4. Restart your IDE/agent.\n`);
 }
 
@@ -176,7 +194,7 @@ function hooksInstall() {
   s.hooks ??= {};
   const hook = (event: string) => ({
     matcher: "*",
-    hooks: [{ type: "command", command: `npx -y @nara/atlas-mcp@latest hook ${event}` }],
+    hooks: [{ type: "command", command: `atlas hook ${event}` }],
   });
   s.hooks.UserPromptSubmit = [hook("prompt")];
   s.hooks.Stop = [hook("stop")];
@@ -222,19 +240,29 @@ async function hook(event: string) {
   }
 }
 
+const invokedAs = process.argv[1]?.split(/[\\/]/).pop()?.replace(/\.(js|cjs|mjs)$/, "") ?? "";
 const cmd = process.argv[2];
+
+function showHelp() {
+  out(`atlas — connect this repo to your Atlas knowledge hub\n`);
+  out(`Install once:  bun install -g ${GITHUB_PKG}\n`);
+  out(`  atlas .                 set up .atlas + agent configs here`);
+  out(`  atlas . --project foo   bind to a specific Atlas project`);
+  out(`  atlas hooks install     install Claude Code auto-capture hooks`);
+  out(`  atlas serve             run the MCP server over stdio (IDEs spawn atlas-mcp for you)`);
+}
+
 (async () => {
   // `atlas .` or `atlas init` → scaffold .atlas + agent configs in the current folder
   if (cmd === "." || cmd === "init" || cmd === "setup") await init();
   else if (cmd === "hooks" && process.argv[3] === "install") hooksInstall();
   else if (cmd === "hook") await hook(process.argv[3] ?? "stop");
-  else if (cmd === "serve" || cmd === undefined) await runServer(); // stdio MCP server (default when spawned by an IDE)
+  else if (invokedAs === "atlas-mcp" || cmd === "serve") await runServer(); // stdio MCP server (IDEs spawn atlas-mcp)
+  else if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") showHelp();
   else {
-    out(`atlas — connect this repo to your Atlas knowledge hub\n`);
-    out(`  atlas .                 set up .atlas + agent configs here`);
-    out(`  atlas . --project foo   …binding to a specific Atlas project`);
-    out(`  atlas hooks install     install Claude Code auto-capture hooks`);
-    out(`  atlas serve             run the MCP server over stdio (IDEs do this for you)`);
+    out(`Unknown command: ${cmd}\n`);
+    showHelp();
+    process.exit(1);
   }
 })().catch((e) => {
   process.stderr.write(`[atlas-mcp] ${(e as Error).message}\n`);

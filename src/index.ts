@@ -28,7 +28,7 @@ function hasScope(scopes: string[], required: string): boolean {
 export async function runServer() {
   const { baseUrl, apiKey, config, cwd } = loadConfig();
   if (!apiKey) {
-    log("No ATLAS_MCP_KEY set. Run `npx @nara/atlas-mcp init` to set up. Exiting.");
+    log("No ATLAS_MCP_KEY set. Run `atlas .` in your repo to set up. Exiting.");
     process.exit(1);
   }
   const client = new AtlasClient(baseUrl, apiKey);
