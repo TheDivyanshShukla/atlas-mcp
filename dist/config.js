@@ -1,6 +1,11 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-/** Walk up from cwd to find the nearest `.atlas` marker (repo root activation). */
+import { homedir } from "node:os";
+/** Machine-wide defaults (set by `cursor-install` / `install`). */
+export function globalConfigPath() {
+    return join(homedir(), ".atlas", "config.json");
+}
+/** Optional per-repo override — walk up from cwd. */
 export function findDotAtlas(start = process.cwd()) {
     let dir = start;
     for (let i = 0; i < 40; i++) {
@@ -14,24 +19,26 @@ export function findDotAtlas(start = process.cwd()) {
     }
     return null;
 }
+function readConfigFile(path) {
+    try {
+        return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+    }
+    catch {
+        return {};
+    }
+}
 export function loadConfig() {
     const found = findDotAtlas();
-    let config = {};
-    if (found) {
-        try {
-            config = JSON.parse(readFileSync(found.path, "utf8"));
-        }
-        catch {
-            // tolerate a comment-free JSON; ignore parse errors
-        }
-    }
+    // Global first, optional repo .atlas overrides (most users only need global).
+    let config = { ...readConfigFile(globalConfigPath()) };
+    if (found)
+        config = { ...config, ...readConfigFile(found.path) };
     return {
         baseUrl: (process.env.ATLAS_BASE_URL || "https://atlas.naravirtual.in").replace(/\/$/, ""),
         apiKey: process.env.ATLAS_MCP_KEY || process.env.ATLAS_API_KEY || null,
         config,
-        cwd: found?.root ?? process.cwd(),
+        cwd: process.cwd(),
     };
 }
-/** Default toolsets when `.atlas` doesn't specify. Write is ON by default (agents create docs,
- *  upload files, save prompts). Narrow it per-repo in `.atlas` or per-key in Atlas if you want. */
+/** Default toolsets when config doesn't specify. Write is ON by default. */
 export const DEFAULT_TOOLSETS = ["context", "capture", "tasks", "write"];

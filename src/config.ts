@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { homedir } from "node:os";
 
 export type AtlasConfig = {
   project?: string;
@@ -13,10 +14,16 @@ export type Resolved = {
   baseUrl: string;
   apiKey: string | null;
   config: AtlasConfig;
+  /** Workspace root for localPath — the IDE's cwd, not a .atlas marker. */
   cwd: string;
 };
 
-/** Walk up from cwd to find the nearest `.atlas` marker (repo root activation). */
+/** Machine-wide defaults (set by `cursor-install` / `install`). */
+export function globalConfigPath() {
+  return join(homedir(), ".atlas", "config.json");
+}
+
+/** Optional per-repo override — walk up from cwd. */
 export function findDotAtlas(start = process.cwd()): { path: string; root: string } | null {
   let dir = start;
   for (let i = 0; i < 40; i++) {
@@ -29,24 +36,27 @@ export function findDotAtlas(start = process.cwd()): { path: string; root: strin
   return null;
 }
 
+function readConfigFile(path: string): AtlasConfig {
+  try {
+    return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as AtlasConfig) : {};
+  } catch {
+    return {};
+  }
+}
+
 export function loadConfig(): Resolved {
   const found = findDotAtlas();
-  let config: AtlasConfig = {};
-  if (found) {
-    try {
-      config = JSON.parse(readFileSync(found.path, "utf8"));
-    } catch {
-      // tolerate a comment-free JSON; ignore parse errors
-    }
-  }
+  // Global first, optional repo .atlas overrides (most users only need global).
+  let config: AtlasConfig = { ...readConfigFile(globalConfigPath()) };
+  if (found) config = { ...config, ...readConfigFile(found.path) };
+
   return {
     baseUrl: (process.env.ATLAS_BASE_URL || "https://atlas.naravirtual.in").replace(/\/$/, ""),
     apiKey: process.env.ATLAS_MCP_KEY || process.env.ATLAS_API_KEY || null,
     config,
-    cwd: found?.root ?? process.cwd(),
+    cwd: process.cwd(),
   };
 }
 
-/** Default toolsets when `.atlas` doesn't specify. Write is ON by default (agents create docs,
- *  upload files, save prompts). Narrow it per-repo in `.atlas` or per-key in Atlas if you want. */
+/** Default toolsets when config doesn't specify. Write is ON by default. */
 export const DEFAULT_TOOLSETS = ["context", "capture", "tasks", "write"];

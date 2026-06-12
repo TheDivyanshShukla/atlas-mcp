@@ -38,7 +38,7 @@ async function readLocalFile(repoRoot: string, localPath: string): Promise<strin
 export async function runServer() {
   const { baseUrl, apiKey, config, cwd } = loadConfig();
   if (!apiKey) {
-    log("No ATLAS_MCP_KEY set. Run `atlas .` in your repo to set up. Exiting.");
+    log("No ATLAS_MCP_KEY set. Run: npx -y github:TheDivyanshShukla/atlas-mcp install --key atlas_mcp_…");
     process.exit(1);
   }
   const client = new AtlasClient(baseUrl, apiKey);
@@ -52,7 +52,7 @@ export async function runServer() {
   }
   await client.flushQueue().catch(() => {});
 
-  // resolve the bound project from .atlas (slug/name/id) → a concrete project id
+  // resolve bound project: ~/.atlas/config.json (global) → optional repo .atlas override → first key project
   const wantedToolsets = (config.toolsets ?? DEFAULT_TOOLSETS).filter((t) => me.toolsets.length === 0 || me.toolsets.includes(t));
   const boundProject =
     me.projects.find((p) => p.id === config.project || p.name.toLowerCase() === (config.project ?? "").toLowerCase()) ??
@@ -63,7 +63,7 @@ export async function runServer() {
   log(`connected as ${me.userId} · project=${boundProject?.name ?? "none"} · toolsets=[${wantedToolsets.join(",")}] · ${readOnly ? "read-only" : "read-write"}`);
 
   const server = new McpServer(
-    { name: "atlas", version: "0.1.7" },
+    { name: "atlas", version: "0.1.9" },
     { instructions: MCP_AGENT_INSTRUCTIONS + ` Bound project: ${boundProject?.name ?? "none"}.` },
   );
 

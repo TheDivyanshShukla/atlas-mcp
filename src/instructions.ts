@@ -14,7 +14,10 @@ What belongs where:
 - tasks (atlas_create_task / atlas_update_task): project progress and follow-ups — not documentation.
 - prompts (atlas_save_prompt): reusable instructions the user explicitly wants kept — not every message.
 
-Write files: atlas_file with kind, path, mode (read|write|append|delete). Send content inline or localPath (stdio reads from repo root). projectId accepts project name or UUID.
+Write files: atlas_file with kind, path, mode (read|write|append|delete).
+- URL MCP: pass content inline (Read the workspace file first — localPath does not work remotely).
+- Stdio atlas CLI: localPath reads from your open workspace. Default project in ~/.atlas/config.json (global).
+projectId accepts project name or UUID.
 
 Env: atlas_set_secret for one key; atlas_import_env for a .env body.
 

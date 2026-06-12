@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { execSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { runServer } from "./index.js";
-import { loadConfig, DEFAULT_TOOLSETS } from "./config.js";
+import { loadConfig, DEFAULT_TOOLSETS, globalConfigPath } from "./config.js";
 function out(m) {
     process.stderr.write(m + "\n");
 }
@@ -26,51 +26,33 @@ function writeJson(p, data) {
     writeFileSync(p, JSON.stringify(data, null, 2) + "\n");
 }
 // Install once globally: bun install -g github:TheDivyanshShukla/atlas-mcp
-const GITHUB_PKG = "github:TheDivyanshShukla/atlas-mcp";
-const SERVER_ENTRY = { command: "atlas", args: [] };
-function hasGlobalCli(name) {
-    try {
-        const probe = process.platform === "win32" ? `where ${name}` : `command -v ${name}`;
-        execSync(probe, { stdio: ["ignore", "pipe", "ignore"], shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh" });
-        return true;
-    }
-    catch {
-        return false;
-    }
+export const GITHUB_PKG = "github:TheDivyanshShukla/atlas-mcp";
+/** Stdio MCP entry for IDEs. npx = zero global install; atlas = faster cold start if on PATH. */
+export function stdioMcpEntry(baseUrl, token = "${ATLAS_MCP_KEY}", via = "npx") {
+    const env = { ATLAS_MCP_KEY: token, ATLAS_BASE_URL: baseUrl };
+    if (via === "global")
+        return { command: "atlas", args: [], env };
+    return { command: "npx", args: ["-y", GITHUB_PKG], env };
 }
-function ensureGlobalInstall() {
-    if (hasGlobalCli("atlas"))
-        return;
-    out(`\n⚠ atlas is not on PATH. Install globally once, then re-run:\n`);
-    out(`  bun install -g ${GITHUB_PKG}`);
-    out(`  npm install -g ${GITHUB_PKG}\n`);
+function writeGlobalAtlasConfig(patch) {
+    const path = globalConfigPath();
+    writeJson(path, { ...readJson(path), ...patch });
+    return path;
 }
-/** Write the Atlas MCP server into each detected agent's config. */
-function writeAgentConfigs(baseUrl) {
-    const env = { ATLAS_MCP_KEY: "${ATLAS_MCP_KEY}", ATLAS_BASE_URL: baseUrl };
-    const stdioEntry = { ...SERVER_ENTRY, env };
-    const cwd = process.cwd();
+/** Machine-wide IDE MCP configs only — never project-local files. */
+function writeGlobalAgentConfigs(baseUrl, token) {
+    const entry = stdioMcpEntry(baseUrl, token, "npx");
     const home = homedir();
     const targets = [
         {
-            name: "Claude Code (.mcp.json)",
-            path: join(cwd, ".mcp.json"),
-            apply: (c) => ({ ...c, mcpServers: { ...(c.mcpServers ?? {}), atlas: stdioEntry } }),
-        },
-        {
             name: "Cursor (~/.cursor/mcp.json)",
             path: join(home, ".cursor", "mcp.json"),
-            apply: (c) => ({ ...c, mcpServers: { ...(c.mcpServers ?? {}), atlas: stdioEntry } }),
+            apply: (c) => ({ ...c, mcpServers: { ...(c.mcpServers ?? {}), atlas: entry } }),
         },
         {
             name: "Windsurf (~/.codeium/windsurf/mcp_config.json)",
             path: join(home, ".codeium", "windsurf", "mcp_config.json"),
-            apply: (c) => ({ ...c, mcpServers: { ...(c.mcpServers ?? {}), atlas: stdioEntry } }),
-        },
-        {
-            name: "VS Code (.vscode/mcp.json)",
-            path: join(cwd, ".vscode", "mcp.json"),
-            apply: (c) => ({ ...c, servers: { ...(c.servers ?? {}), atlas: stdioEntry } }),
+            apply: (c) => ({ ...c, mcpServers: { ...(c.mcpServers ?? {}), atlas: entry } }),
         },
     ];
     for (const t of targets) {
@@ -82,6 +64,16 @@ function writeAgentConfigs(baseUrl) {
             out(`  · skipped ${t.name} (${e.message})`);
         }
     }
+}
+/** Optional: write repo-level .atlas override (does not touch IDE configs). */
+function writeRepoDotAtlas(project, existing) {
+    writeJson(join(process.cwd(), ".atlas"), {
+        project,
+        autoCapture: existing.autoCapture ?? true,
+        toolsets: existing.toolsets ?? DEFAULT_TOOLSETS,
+        readOnly: existing.readOnly ?? false,
+        redactSecretsInLogs: existing.redactSecretsInLogs ?? true,
+    });
 }
 async function apiFetch(baseUrl, key, path, init) {
     try {
@@ -151,7 +143,44 @@ async function resolveProject(baseUrl, key, folder) {
     rl.close();
     return chosen;
 }
-async function init() {
+async function globalInstall(opts = {}) {
+    const key = arg("key") || process.env.ATLAS_MCP_KEY;
+    const baseUrl = (arg("base-url") || process.env.ATLAS_BASE_URL || "https://atlas.naravirtual.in").replace(/\/$/, "");
+    const token = key?.trim() || "${ATLAS_MCP_KEY}";
+    let project = arg("project");
+    if (!project && key) {
+        const folder = process.cwd().split(/[\\/]/).filter(Boolean).pop() || "general";
+        project = await resolveProject(baseUrl, key, folder);
+    }
+    out(`\nGlobal Atlas MCP install (machine-wide, not per-repo):`);
+    if (opts.cursorOnly) {
+        const path = join(homedir(), ".cursor", "mcp.json");
+        const cfg = readJson(path);
+        cfg.mcpServers ??= {};
+        cfg.mcpServers.atlas = stdioMcpEntry(baseUrl, token, "npx");
+        writeJson(path, cfg);
+        out(`  ✓ Cursor (~/.cursor/mcp.json)`);
+    }
+    else {
+        writeGlobalAgentConfigs(baseUrl, token);
+    }
+    if (project) {
+        const cfgPath = writeGlobalAtlasConfig({
+            project,
+            autoCapture: true,
+            toolsets: DEFAULT_TOOLSETS,
+            readOnly: false,
+            redactSecretsInLogs: true,
+        });
+        out(`  ✓ Default project "${project}" → ${cfgPath}`);
+    }
+    out(`\nTransport: npx → ${GITHUB_PKG} (localPath reads from your open workspace)`);
+    if (!key)
+        out(`Set ATLAS_MCP_KEY in your shell, or re-run with --key atlas_mcp_…`);
+    out(`Restart your IDE.\n`);
+}
+/** Optional per-repo override — does NOT touch IDE MCP configs (use install for that). */
+async function bindRepo() {
     const key = arg("key") || process.env.ATLAS_MCP_KEY;
     const folder = process.cwd().split(/[\\/]/).filter(Boolean).pop() || "general";
     const baseUrl = (arg("base-url") || process.env.ATLAS_BASE_URL || "https://atlas.naravirtual.in").replace(/\/$/, "");
@@ -159,38 +188,22 @@ async function init() {
     const existing = existsSync(dotAtlas) ? readJson(dotAtlas) : {};
     const flagProject = arg("project");
     let project;
-    if (flagProject) {
+    if (flagProject)
         project = flagProject;
-    }
     else if (typeof existing.project === "string" && existing.project.trim()) {
         project = existing.project;
-        out(`\nKeeping existing .atlas binding: ${project} (use atlas . --project <name> to change)`);
+        out(`\nKeeping existing .atlas binding: ${project}`);
     }
     else {
         project = await resolveProject(baseUrl, key, folder);
     }
-    // .atlas — committed, no secrets. Holds the project binding + how the agent should behave here.
-    writeJson(dotAtlas, {
-        project,
-        autoCapture: existing.autoCapture ?? true,
-        toolsets: existing.toolsets ?? DEFAULT_TOOLSETS, // write access ON by default
-        readOnly: existing.readOnly ?? false,
-        redactSecretsInLogs: existing.redactSecretsInLogs ?? true,
-    });
-    out(`\nWrote .atlas (project: ${project}, write access on) — safe to commit.`);
-    ensureGlobalInstall();
-    out(`\nAdding the Atlas MCP to your agents:`);
-    writeAgentConfigs(baseUrl);
-    out(`\nNext:`);
-    if (!key) {
-        out(`  1. Create an MCP key in Atlas → Settings → API keys → "MCP key" (Write toolset is on by default).`);
-        out(`  2. Export it:  export ATLAS_MCP_KEY=atlas_mcp_…   (add to your shell profile)`);
-    }
-    else {
-        out(`  Key detected in env. You're set.`);
-    }
-    out(`  3. (Claude Code) capture every prompt automatically:  atlas hooks install`);
-    out(`  4. Restart your IDE/agent.\n`);
+    writeRepoDotAtlas(project, existing);
+    out(`\nWrote .atlas (project: ${project}) — optional repo override; global config is ~/.atlas/config.json`);
+    out(`IDE MCP is machine-wide — run: npx -y ${GITHUB_PKG} install --key $ATLAS_MCP_KEY --project ${project}\n`);
+}
+async function init() {
+    out(`\nTip: MCP is global — prefer: npx -y ${GITHUB_PKG} install --key $ATLAS_MCP_KEY --project <name>\n`);
+    await bindRepo();
 }
 /** Install Claude Code hooks that POST prompts + sessions to Atlas (zero-cooperation capture). */
 function hooksInstall() {
@@ -253,17 +266,29 @@ function shouldRunServer() {
     return cmd === "serve" || invokedAs === "atlas-mcp" || (!cmd && !process.stdin.isTTY);
 }
 function showHelp() {
-    out(`atlas — connect this repo to your Atlas knowledge hub\n`);
-    out(`Install once:  bun install -g ${GITHUB_PKG}\n`);
-    out(`  atlas .                 set up .atlas + agent configs here`);
-    out(`  atlas . --project foo   bind to a specific Atlas project`);
-    out(`  atlas hooks install     install Claude Code auto-capture hooks`);
-    out(`  atlas serve             run the MCP server over stdio (IDEs spawn \`atlas\` for you)`);
+    out(`atlas — connect your IDE to Atlas (global, one-time per machine)\n`);
+    out(`Recommended (no global npm install):\n`);
+    out(`  npx -y ${GITHUB_PKG} install --key atlas_mcp_… --project Nara`);
+    out(`    → ~/.cursor/mcp.json + ~/.atlas/config.json (works in every repo)\n`);
+    out(`  npx -y ${GITHUB_PKG} cursor-install --key atlas_mcp_… --project Nara   Cursor only\n`);
+    out(`Optional per-repo override (not required for MCP):\n`);
+    out(`  npx -y ${GITHUB_PKG} bind --project foo   writes ./.atlas only\n`);
+    out(`Other:\n`);
+    out(`  atlas hooks install     Claude Code auto-capture hooks (per repo)`);
+    out(`  atlas serve             stdio MCP server (IDEs spawn via npx)\n`);
 }
 (async () => {
     // `atlas .` or `atlas init` → scaffold .atlas + agent configs in the current folder
-    if (cmd === "." || cmd === "init" || cmd === "setup")
-        await init();
+    if (cmd === "install")
+        await globalInstall();
+    else if (cmd === "cursor-install" || (cmd === "cursor" && process.argv[3] === "install"))
+        await globalInstall({ cursorOnly: true });
+    else if (cmd === "bind" || cmd === "." || cmd === "init" || cmd === "setup") {
+        if (cmd === "." || cmd === "init" || cmd === "setup")
+            await init();
+        else
+            await bindRepo();
+    }
     else if (cmd === "hooks" && process.argv[3] === "install")
         hooksInstall();
     else if (cmd === "hook")
