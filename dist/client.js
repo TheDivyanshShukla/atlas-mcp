@@ -91,6 +91,17 @@ export class AtlasClient {
             throw e;
         }
     }
+    /** PATCH (no queue — task updates should fail loudly if offline). */
+    async patch(path, body) {
+        const res = await fetch(`${this.baseUrl}${path}`, {
+            method: "PATCH",
+            headers: this.headers(),
+            body: JSON.stringify(body),
+        });
+        if (!res.ok)
+            throw new Error(`${res.status} ${await res.text()}`);
+        return (await res.json());
+    }
     /** Flush any queued writes (best-effort, called on startup). */
     async flushQueue() {
         if (!existsSync(QUEUE_FILE))

@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { loadConfig, DEFAULT_TOOLSETS } from "./config.js";
 import { AtlasClient } from "./client.js";
+import { MCP_AGENT_INSTRUCTIONS } from "./instructions.js";
 
 function log(m: string) {
   process.stderr.write(`[atlas-mcp] ${m}\n`);
@@ -53,16 +54,8 @@ export async function runServer() {
   log(`connected as ${me.userId} · project=${boundProject?.name ?? "none"} · toolsets=[${wantedToolsets.join(",")}] · ${readOnly ? "read-only" : "read-write"}`);
 
   const server = new McpServer(
-    { name: "atlas", version: "0.1.0" },
-    {
-      instructions:
-        `This repo is tracked by Atlas (project: ${boundProject?.name ?? "unbound"}). ` +
-        `Use atlas_context at the start of a task to load approved prompts and docs. ` +
-        (wantedToolsets.includes("capture")
-          ? `When the user gives you a coding task, call atlas_log_work with a one-line summary of what you did and the user's request, and the changed files — so the team can see this work. `
-          : "") +
-        `Fetch credentials with atlas_get_secret instead of asking the user to paste them.`,
-    },
+    { name: "atlas", version: "0.1.5" },
+    { instructions: MCP_AGENT_INSTRUCTIONS + ` Bound project: ${boundProject?.name ?? "none"}.` },
   );
 
   const can = (scope: string, toolset?: string) =>
@@ -183,11 +176,82 @@ export async function runServer() {
     server.registerTool(
       "atlas_save_prompt",
       {
-        description: "Promote a good prompt the user wrote into the shared Atlas prompt library.",
-        inputSchema: { title: z.string(), body: z.string(), tags: z.array(z.string()).optional() },
+        description:
+          "Save a strong user prompt to the shared library — reusable instructions/templates, not every message.",
+        inputSchema: {
+          title: z.string(),
+          body: z.string(),
+          tags: z.array(z.string()).optional(),
+          projectId: z.string().optional(),
+        },
       },
-      async ({ title, body, tags }) => {
-        const r = await client.post("/api/v1/prompts", { projectId, title, body, tags: tags ?? [] });
+      async ({ title, body, tags, projectId: pid }) => {
+        const id =
+          me.projects.find((p) => p.id === pid || p.name.toLowerCase() === (pid ?? "").toLowerCase())?.id ?? projectId;
+        const r = await client.post("/api/v1/prompts", { projectId: id, title, body, tags: tags ?? [] });
+        return { content: [{ type: "text", text: JSON.stringify(r) }] };
+      },
+    );
+  }
+
+  if (can("docs:write", "write") && !readOnly) {
+    server.registerTool(
+      "atlas_upsert_doc",
+      {
+        description: "Create/update a doc by path (e.g. docs/runbooks/deploy.md). Folders auto-created.",
+        inputSchema: {
+          path: z.string(),
+          content: z.string(),
+          title: z.string().optional(),
+          projectId: z.string().optional(),
+        },
+      },
+      async ({ path, content, title, projectId: pid }) => {
+        const r = await client.post("/api/v1/docs/upsert", { projectId: pid ?? projectId, path, content, title });
+        return { content: [{ type: "text", text: JSON.stringify(r) }] };
+      },
+    );
+  }
+
+  if (can("code:write", "write") && !readOnly) {
+    server.registerTool(
+      "atlas_upload_file",
+      {
+        description: "Upload/replace a file by relative path (e.g. src/lib/util.ts).",
+        inputSchema: { path: z.string(), content: z.string(), projectId: z.string().optional() },
+      },
+      async ({ path, content, projectId: pid }) => {
+        const r = await client.post("/api/v1/code/files", { projectId: pid ?? projectId, path, content });
+        return { content: [{ type: "text", text: JSON.stringify(r) }] };
+      },
+    );
+  }
+
+  if (can("secrets:write", "write") && !readOnly) {
+    server.registerTool(
+      "atlas_set_secret",
+      {
+        description: "Set one secret/env var by key (audited).",
+        inputSchema: {
+          key: z.string(),
+          value: z.string(),
+          group: z.string().optional(),
+          projectId: z.string().optional(),
+        },
+      },
+      async ({ key, value, group, projectId: pid }) => {
+        const r = await client.post("/api/v1/secrets", { projectId: pid ?? projectId, key, value, group });
+        return { content: [{ type: "text", text: JSON.stringify(r) }] };
+      },
+    );
+    server.registerTool(
+      "atlas_import_env",
+      {
+        description: "Import .env file content; group from path (e.g. .env.production → production).",
+        inputSchema: { content: z.string(), path: z.string().optional(), group: z.string().optional(), projectId: z.string().optional() },
+      },
+      async ({ content, path, group, projectId: pid }) => {
+        const r = await client.post("/api/v1/secrets", { projectId: pid ?? projectId, content, path, group });
         return { content: [{ type: "text", text: JSON.stringify(r) }] };
       },
     );
@@ -208,11 +272,29 @@ export async function runServer() {
     server.registerTool(
       "atlas_create_task",
       {
-        description: "Create a task/todo in the project (e.g. follow-up work the AI identified).",
-        inputSchema: { title: z.string(), description: z.string().optional(), priority: z.enum(["low", "medium", "high"]).optional() },
+        description: "Create a follow-up task on the project task board.",
+        inputSchema: { title: z.string(), description: z.string().optional(), priority: z.enum(["low", "medium", "high"]).optional(), projectId: z.string().optional() },
       },
-      async ({ title, description, priority }) => {
-        const r = await client.post("/api/v1/tasks", { projectId, title, description, priority });
+      async ({ title, description, priority, projectId: pid }) => {
+        const r = await client.post("/api/v1/tasks", { projectId: pid ?? projectId, title, description, priority });
+        return { content: [{ type: "text", text: JSON.stringify(r) }] };
+      },
+    );
+    server.registerTool(
+      "atlas_update_task",
+      {
+        description: "Update task status (todo/doing/blocked/done), title, or priority.",
+        inputSchema: {
+          taskId: z.string(),
+          title: z.string().optional(),
+          description: z.string().optional(),
+          status: z.enum(["todo", "doing", "blocked", "done"]).optional(),
+          priority: z.enum(["low", "medium", "high"]).optional(),
+          projectId: z.string().optional(),
+        },
+      },
+      async ({ taskId, title, description, status, priority, projectId: pid }) => {
+        const r = await client.patch("/api/v1/tasks", { projectId: pid ?? projectId, taskId, title, description, status, priority });
         return { content: [{ type: "text", text: JSON.stringify(r) }] };
       },
     );
