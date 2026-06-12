@@ -28,7 +28,7 @@ function writeJson(p: string, data: unknown) {
 
 // Install once globally: bun install -g github:TheDivyanshShukla/atlas-mcp
 const GITHUB_PKG = "github:TheDivyanshShukla/atlas-mcp";
-const SERVER_ENTRY = { command: "atlas-mcp", args: [] as string[] };
+const SERVER_ENTRY = { command: "atlas", args: [] as string[] };
 
 function hasGlobalCli(name: string): boolean {
   try {
@@ -41,8 +41,8 @@ function hasGlobalCli(name: string): boolean {
 }
 
 function ensureGlobalInstall() {
-  if (hasGlobalCli("atlas-mcp")) return;
-  out(`\n⚠ atlas-mcp is not on PATH. Install globally once, then re-run:\n`);
+  if (hasGlobalCli("atlas")) return;
+  out(`\n⚠ atlas is not on PATH. Install globally once, then re-run:\n`);
   out(`  bun install -g ${GITHUB_PKG}`);
   out(`  npm install -g ${GITHUB_PKG}\n`);
 }
@@ -243,13 +243,18 @@ async function hook(event: string) {
 const invokedAs = process.argv[1]?.split(/[\\/]/).pop()?.replace(/\.(js|cjs|mjs)$/, "") ?? "";
 const cmd = process.argv[2];
 
+function shouldRunServer(): boolean {
+  // IDEs spawn `atlas` with piped stdio (not a TTY). A bare `atlas` in your terminal shows help.
+  return cmd === "serve" || invokedAs === "atlas-mcp" || (!cmd && !process.stdin.isTTY);
+}
+
 function showHelp() {
   out(`atlas — connect this repo to your Atlas knowledge hub\n`);
   out(`Install once:  bun install -g ${GITHUB_PKG}\n`);
   out(`  atlas .                 set up .atlas + agent configs here`);
   out(`  atlas . --project foo   bind to a specific Atlas project`);
   out(`  atlas hooks install     install Claude Code auto-capture hooks`);
-  out(`  atlas serve             run the MCP server over stdio (IDEs spawn atlas-mcp for you)`);
+  out(`  atlas serve             run the MCP server over stdio (IDEs spawn \`atlas\` for you)`);
 }
 
 (async () => {
@@ -257,7 +262,7 @@ function showHelp() {
   if (cmd === "." || cmd === "init" || cmd === "setup") await init();
   else if (cmd === "hooks" && process.argv[3] === "install") hooksInstall();
   else if (cmd === "hook") await hook(process.argv[3] ?? "stop");
-  else if (invokedAs === "atlas-mcp" || cmd === "serve") await runServer(); // stdio MCP server (IDEs spawn atlas-mcp)
+  else if (shouldRunServer()) await runServer();
   else if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") showHelp();
   else {
     out(`Unknown command: ${cmd}\n`);

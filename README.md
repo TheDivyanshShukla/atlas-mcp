@@ -11,7 +11,7 @@ bun install -g github:TheDivyanshShukla/atlas-mcp
 # or: npm install -g github:TheDivyanshShukla/atlas-mcp
 ```
 
-This puts **`atlas`** (repo setup CLI) and **`atlas-mcp`** (stdio MCP server for IDEs) on your PATH.
+This puts **`atlas`** on your PATH — repo setup, hooks, and the stdio MCP server IDEs spawn.
 
 ## One-command setup
 
@@ -73,11 +73,11 @@ claude mcp add --transport http atlas https://atlas.naravirtual.in/api/mcp --hea
 
 Or for Cursor/Windsurf/VS Code, paste the remote config (see Atlas → Connect agent for your exact snippet).
 
-**Local (repo-aware, recommended for capture)** — stdio via globally installed `atlas-mcp` (reads `.atlas`, offline cache):
+**Local (repo-aware, recommended for capture)** — stdio via globally installed `atlas` (reads `.atlas`, offline cache):
 
 ```bash
 atlas .                              # set up a repo
-# agents are configured to run:  atlas-mcp
+# agents are configured to run:  atlas
 ```
 
 Auth is read from `ATLAS_MCP_KEY` (set once in your shell profile). Default endpoint is
