@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { relative, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -24,6 +26,13 @@ function hasScope(scopes: string[], required: string): boolean {
     if (res !== "*" && res !== rRes) return false;
     return act === rAct || (rAct === "read" && act === "write");
   });
+}
+
+async function readLocalFile(repoRoot: string, localPath: string): Promise<string> {
+  const abs = resolve(repoRoot, localPath);
+  const rel = relative(resolve(repoRoot), abs);
+  if (rel.startsWith("..")) throw new Error("localPath must stay inside the repo");
+  return readFile(abs, "utf-8");
 }
 
 export async function runServer() {
@@ -54,7 +63,7 @@ export async function runServer() {
   log(`connected as ${me.userId} · project=${boundProject?.name ?? "none"} · toolsets=[${wantedToolsets.join(",")}] · ${readOnly ? "read-only" : "read-write"}`);
 
   const server = new McpServer(
-    { name: "atlas", version: "0.1.5" },
+    { name: "atlas", version: "0.1.7" },
     { instructions: MCP_AGENT_INSTRUCTIONS + ` Bound project: ${boundProject?.name ?? "none"}.` },
   );
 
@@ -110,12 +119,25 @@ export async function runServer() {
     server.registerTool(
       "atlas_search",
       {
-        description: "Search the project across prompts, docs, code, voice and secret KEYS.",
-        inputSchema: { query: z.string(), projectId: z.string().optional() },
+        description:
+          "Keyword search with optional types filter: prompt, doc, code, secret, asset, voice, task. " +
+          "Narrow with types=doc|code|task etc. Full text: atlas_file mode=read.",
+        inputSchema: {
+          query: z.string(),
+          types: z
+            .array(z.enum(["prompt", "doc", "code", "secret", "asset", "voice", "task"]))
+            .optional()
+            .describe("surface filter"),
+          limit: z.number().min(1).max(20).optional(),
+          projectId: z.string().optional(),
+        },
       },
-      async ({ query, projectId: pid }) => {
+      async ({ query, types, limit, projectId: pid }) => {
         const id = pid ?? projectId;
-        const r = await client.get(`/api/v1/search?projectId=${id}&q=${encodeURIComponent(query)}`);
+        const params = new URLSearchParams({ projectId: id ?? "", q: query });
+        if (types?.length) params.set("types", types.join(","));
+        if (limit) params.set("limit", String(limit));
+        const r = await client.get(`/api/v1/search?${params}`);
         return { content: [{ type: "text", text: JSON.stringify(r, null, 2) }] };
       },
     );
@@ -194,35 +216,47 @@ export async function runServer() {
     );
   }
 
-  if (can("docs:write", "write") && !readOnly) {
+  const canFile =
+    can("docs:read", "context") ||
+    can("docs:write", "write") ||
+    can("code:read", "context") ||
+    can("code:write", "write");
+
+  if (canFile) {
     server.registerTool(
-      "atlas_upsert_doc",
+      "atlas_file",
       {
-        description: "Create/update a doc by path (e.g. docs/runbooks/deploy.md). Folders auto-created.",
+        description:
+          "Docs (kind=doc) or rare code snippets (kind=code — not whole codebase). " +
+          "mode read|write|append|delete. write/append: content inline or localPath from repo root.",
         inputSchema: {
+          kind: z.enum(["doc", "code"]),
           path: z.string(),
-          content: z.string(),
-          title: z.string().optional(),
+          mode: z.enum(["read", "write", "append", "delete"]),
+          content: z.string().optional(),
+          localPath: z.string().optional().describe("read file from repo root (write/append)"),
           projectId: z.string().optional(),
         },
       },
-      async ({ path, content, title, projectId: pid }) => {
-        const r = await client.post("/api/v1/docs/upsert", { projectId: pid ?? projectId, path, content, title });
-        return { content: [{ type: "text", text: JSON.stringify(r) }] };
-      },
-    );
-  }
-
-  if (can("code:write", "write") && !readOnly) {
-    server.registerTool(
-      "atlas_upload_file",
-      {
-        description: "Upload/replace a file by relative path (e.g. src/lib/util.ts).",
-        inputSchema: { path: z.string(), content: z.string(), projectId: z.string().optional() },
-      },
-      async ({ path, content, projectId: pid }) => {
-        const r = await client.post("/api/v1/code/files", { projectId: pid ?? projectId, path, content });
-        return { content: [{ type: "text", text: JSON.stringify(r) }] };
+      async ({ kind, path, mode, content, localPath, projectId: pid }) => {
+        if ((mode === "write" || mode === "append") && !readOnly) {
+          let body = content;
+          if (localPath) body = await readLocalFile(cwd, localPath);
+          if (body === undefined) {
+            return { content: [{ type: "text", text: "content or localPath required for write/append" }], isError: true };
+          }
+          const r = await client.post("/api/v1/files", { projectId: pid ?? projectId, kind, path, mode, content: body });
+          return { content: [{ type: "text", text: JSON.stringify(r) }] };
+        }
+        if (mode === "read") {
+          const r = await client.post("/api/v1/files", { projectId: pid ?? projectId, kind, path, mode: "read" });
+          return { content: [{ type: "text", text: JSON.stringify(r) }] };
+        }
+        if (mode === "delete" && !readOnly) {
+          const r = await client.post("/api/v1/files", { projectId: pid ?? projectId, kind, path, mode: "delete" });
+          return { content: [{ type: "text", text: JSON.stringify(r) }] };
+        }
+        return { content: [{ type: "text", text: "read-only key or missing scope" }], isError: true };
       },
     );
   }
