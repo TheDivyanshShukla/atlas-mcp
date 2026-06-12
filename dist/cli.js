@@ -34,6 +34,22 @@ export function stdioMcpEntry(baseUrl, token = "${ATLAS_MCP_KEY}", via = "npx") 
         return { command: "atlas", args: [], env };
     return { command: "npx", args: ["-y", GITHUB_PKG], env };
 }
+function vscodeUserMcpPath(variant = "Code") {
+    const home = homedir();
+    if (process.platform === "win32") {
+        const appData = process.env.APPDATA || join(home, "AppData", "Roaming");
+        return join(appData, variant, "User", "mcp.json");
+    }
+    if (process.platform === "darwin") {
+        return join(home, "Library", "Application Support", variant, "User", "mcp.json");
+    }
+    return join(home, ".config", variant, "User", "mcp.json");
+}
+/** VS Code mcp.json uses `servers` + explicit stdio type. */
+function vscodeMcpEntry(baseUrl, token) {
+    const { command, args, env } = stdioMcpEntry(baseUrl, token, "npx");
+    return { type: "stdio", command, args, env };
+}
 function writeGlobalAtlasConfig(patch) {
     const path = globalConfigPath();
     writeJson(path, { ...readJson(path), ...patch });
@@ -42,17 +58,42 @@ function writeGlobalAtlasConfig(patch) {
 /** Machine-wide IDE MCP configs only — never project-local files. */
 function writeGlobalAgentConfigs(baseUrl, token) {
     const entry = stdioMcpEntry(baseUrl, token, "npx");
+    const vscodeEntry = vscodeMcpEntry(baseUrl, token);
     const home = homedir();
+    const merge = (c, root, server) => ({
+        ...c,
+        [root]: { ...(c[root] ?? {}), atlas: server },
+    });
     const targets = [
         {
             name: "Cursor (~/.cursor/mcp.json)",
             path: join(home, ".cursor", "mcp.json"),
-            apply: (c) => ({ ...c, mcpServers: { ...(c.mcpServers ?? {}), atlas: entry } }),
+            apply: (c) => merge(c, "mcpServers", entry),
+        },
+        {
+            name: "Claude Code (~/.claude.json)",
+            path: join(home, ".claude.json"),
+            apply: (c) => merge(c, "mcpServers", entry),
         },
         {
             name: "Windsurf (~/.codeium/windsurf/mcp_config.json)",
             path: join(home, ".codeium", "windsurf", "mcp_config.json"),
-            apply: (c) => ({ ...c, mcpServers: { ...(c.mcpServers ?? {}), atlas: entry } }),
+            apply: (c) => merge(c, "mcpServers", entry),
+        },
+        {
+            name: "VS Code (User/mcp.json)",
+            path: vscodeUserMcpPath("Code"),
+            apply: (c) => merge(c, "servers", vscodeEntry),
+        },
+        {
+            name: "VS Code Insiders (User/mcp.json)",
+            path: vscodeUserMcpPath("Code - Insiders"),
+            apply: (c) => merge(c, "servers", vscodeEntry),
+        },
+        {
+            name: "GitHub Copilot CLI (~/.copilot/mcp-config.json)",
+            path: join(home, ".copilot", "mcp-config.json"),
+            apply: (c) => merge(c, "mcpServers", entry),
         },
     ];
     for (const t of targets) {
@@ -177,7 +218,7 @@ async function globalInstall(opts = {}) {
     out(`\nTransport: npx → ${GITHUB_PKG} (localPath reads from your open workspace)`);
     if (!key)
         out(`Set ATLAS_MCP_KEY in your shell, or re-run with --key atlas_mcp_…`);
-    out(`Restart your IDE.\n`);
+    out(`Restart Cursor, Claude Code, Windsurf, VS Code, or Copilot CLI.\n`);
 }
 /** Optional per-repo override — does NOT touch IDE MCP configs (use install for that). */
 async function bindRepo() {
@@ -269,7 +310,7 @@ function showHelp() {
     out(`atlas — connect your IDE to Atlas (global, one-time per machine)\n`);
     out(`Recommended (no global npm install):\n`);
     out(`  npx -y ${GITHUB_PKG} install --key atlas_mcp_… --project Nara`);
-    out(`    → ~/.cursor/mcp.json + ~/.atlas/config.json (works in every repo)\n`);
+    out(`    → Cursor, Claude Code, Windsurf, VS Code, Copilot CLI + ~/.atlas/config.json\n`);
     out(`  npx -y ${GITHUB_PKG} cursor-install --key atlas_mcp_… --project Nara   Cursor only\n`);
     out(`Optional per-repo override (not required for MCP):\n`);
     out(`  npx -y ${GITHUB_PKG} bind --project foo   writes ./.atlas only\n`);

@@ -63,7 +63,7 @@ export async function runServer() {
   log(`connected as ${me.userId} · project=${boundProject?.name ?? "none"} · toolsets=[${wantedToolsets.join(",")}] · ${readOnly ? "read-only" : "read-write"}`);
 
   const server = new McpServer(
-    { name: "atlas", version: "0.1.9" },
+    { name: "atlas", version: "0.1.11" },
     { instructions: MCP_AGENT_INSTRUCTIONS + ` Bound project: ${boundProject?.name ?? "none"}.` },
   );
 

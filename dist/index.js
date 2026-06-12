@@ -48,7 +48,7 @@ export async function runServer() {
     const projectId = boundProject?.id;
     const readOnly = me.readOnly || !!config.readOnly;
     log(`connected as ${me.userId} · project=${boundProject?.name ?? "none"} · toolsets=[${wantedToolsets.join(",")}] · ${readOnly ? "read-only" : "read-write"}`);
-    const server = new McpServer({ name: "atlas", version: "0.1.9" }, { instructions: MCP_AGENT_INSTRUCTIONS + ` Bound project: ${boundProject?.name ?? "none"}.` });
+    const server = new McpServer({ name: "atlas", version: "0.1.11" }, { instructions: MCP_AGENT_INSTRUCTIONS + ` Bound project: ${boundProject?.name ?? "none"}.` });
     const can = (scope, toolset) => hasScope(me.scopes, scope) && (!toolset || wantedToolsets.includes(toolset));
     // ---- context (read) ----
     server.registerTool("atlas_whoami", { description: "Who am I in Atlas, the bound project, and what this key can do.", inputSchema: {} }, async () => ({ content: [{ type: "text", text: JSON.stringify({ ...me, boundProject }, null, 2) }] }));
