@@ -215,7 +215,7 @@ async function globalInstall(opts = {}) {
         });
         out(`  ✓ Default project "${project}" → ${cfgPath}`);
     }
-    out(`\nTransport: npx → ${GITHUB_PKG} (localPath reads from your open workspace)`);
+    out(`\nTransport: npx → ${GITHUB_PKG} (tools sync from server on each connect; localPath reads from workspace)`);
     if (!key)
         out(`Set ATLAS_MCP_KEY in your shell, or re-run with --key atlas_mcp_…`);
     out(`Restart Cursor, Claude Code, Windsurf, VS Code, or Copilot CLI.\n`);
