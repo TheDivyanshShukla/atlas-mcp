@@ -7,7 +7,7 @@ import { loadConfig } from "./config.js";
 import { AtlasClient } from "./client.js";
 
 /** Thin local bridge — tool catalog and handlers live on the Atlas server (auto-sync on every connect). */
-export const CLIENT_VERSION = "0.4.0";
+export const CLIENT_VERSION = "0.4.3";
 
 const dynamicInput = z.object({}).passthrough();
 const NO_PROJECT_DEFAULT = new Set(["atlas_whoami", "atlas_list_projects", "atlas_create_project", "atlas_log_work"]);

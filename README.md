@@ -7,11 +7,21 @@ and Atlas passively captures what the AI builds, so the team can see it without 
 ## Install globally (once per machine)
 
 ```bash
-bun install -g github:TheDivyanshShukla/atlas-mcp
-# or: npm install -g github:TheDivyanshShukla/atlas-mcp
+bun install -g github:TheDivyanshShukla/atlas-mcp#main
+# or: npm install -g github:TheDivyanshShukla/atlas-mcp#main
 ```
 
 This puts **`atlas`** on your PATH — repo setup, hooks, and the stdio MCP server IDEs spawn.
+
+## Update to latest
+
+```bash
+atlas update
+# or without a prior global install:
+npx -y github:TheDivyanshShukla/atlas-mcp#main update
+```
+
+Pulls the latest commit from GitHub `main` (IDE `npx` configs from `atlas install` already use `#main`).
 
 ## One-command setup
 

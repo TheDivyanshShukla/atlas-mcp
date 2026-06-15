@@ -26,14 +26,50 @@ function writeJson(p: string, data: unknown) {
   writeFileSync(p, JSON.stringify(data, null, 2) + "\n");
 }
 
-// Install once globally: bun install -g github:TheDivyanshShukla/atlas-mcp
-export const GITHUB_PKG = "github:TheDivyanshShukla/atlas-mcp";
+// Install once globally: bun install -g github:TheDivyanshShukla/atlas-mcp#main
+export const GITHUB_REPO = "TheDivyanshShukla/atlas-mcp";
+export const GITHUB_PKG = `github:${GITHUB_REPO}`;
+/** Pin to main so npx/bun always resolve the latest commit (not a stale lock). */
+export const GITHUB_PKG_LATEST = `${GITHUB_PKG}#main`;
+
+function run(cmd: string) {
+  execSync(cmd, {
+    stdio: "inherit",
+    shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
+  });
+}
+
+/** Refresh global atlas-mcp from GitHub main (bun or npm). */
+export function selfUpdate() {
+  out(`\nUpdating atlas-mcp from ${GITHUB_PKG_LATEST} …\n`);
+  const bun = (() => {
+    try {
+      execSync("bun --version", { stdio: ["ignore", "pipe", "ignore"] });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  if (bun) {
+    try {
+      run(`bun remove -g atlas-mcp`);
+    } catch {
+      /* not installed via bun yet */
+    }
+    run(`bun install -g ${GITHUB_PKG_LATEST}`);
+  } else {
+    run(`npm install -g ${GITHUB_PKG_LATEST}`);
+  }
+
+  out(`\n✓ Updated. Restart Cursor / Claude Code MCP, or reload the window.\n`);
+}
 
 /** Stdio MCP entry for IDEs. npx = zero global install; atlas = faster cold start if on PATH. */
 export function stdioMcpEntry(baseUrl: string, token = "${ATLAS_MCP_KEY}", via: "npx" | "global" = "npx") {
   const env = { ATLAS_MCP_KEY: token, ATLAS_BASE_URL: baseUrl };
   if (via === "global") return { command: "atlas", args: [] as string[], env };
-  return { command: "npx", args: ["-y", GITHUB_PKG], env };
+  return { command: "npx", args: ["-y", GITHUB_PKG_LATEST], env };
 }
 
 function vscodeUserMcpPath(variant: "Code" | "Code - Insiders" = "Code"): string {
@@ -217,7 +253,7 @@ async function globalInstall(opts: { cursorOnly?: boolean } = {}) {
     out(`  ✓ Default project "${project}" → ${cfgPath}`);
   }
 
-  out(`\nTransport: npx → ${GITHUB_PKG} (tools sync from server on each connect; localPath reads from workspace)`);
+  out(`Transport: npx → ${GITHUB_PKG_LATEST} (tools sync from server on each connect; localPath reads from workspace)`);
   if (!key) out(`Set ATLAS_MCP_KEY in your shell, or re-run with --key atlas_mcp_…`);
   out(`Restart Cursor, Claude Code, Windsurf, VS Code, or Copilot CLI.\n`);
 }
@@ -322,6 +358,8 @@ function showHelp() {
   out(`  atlas . [--project Name]   link repo; creates project if missing (uses folder name by default)`);
   out(`  npx -y ${GITHUB_PKG} bind --project foo   writes ./.atlas only\n`);
   out(`Other:\n`);
+  out(`  atlas update            pull latest atlas-mcp from GitHub (bun/npm global)`);
+  out(`  npx -y ${GITHUB_PKG_LATEST} update   same, without a prior global install`);
   out(`  atlas hooks install     Claude Code auto-capture hooks (per repo)`);
   out(`  atlas serve             stdio MCP server (IDEs spawn via npx)\n`);
 }
@@ -334,6 +372,7 @@ function showHelp() {
     if (cmd === "." || cmd === "init" || cmd === "setup") await init();
     else await bindRepo();
   }
+  else if (cmd === "update" || cmd === "self-update") selfUpdate();
   else if (cmd === "hooks" && process.argv[3] === "install") hooksInstall();
   else if (cmd === "hook") await hook(process.argv[3] ?? "stop");
   else if (shouldRunServer()) await runServer();
