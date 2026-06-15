@@ -6,7 +6,7 @@ import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { AtlasClient } from "./client.js";
 /** Thin local bridge — tool catalog and handlers live on the Atlas server (auto-sync on every connect). */
-export const CLIENT_VERSION = "0.2.0";
+export const CLIENT_VERSION = "0.4.0";
 const dynamicInput = z.object({}).passthrough();
 const NO_PROJECT_DEFAULT = new Set(["atlas_whoami", "atlas_list_projects", "atlas_create_project", "atlas_log_work"]);
 function log(m) {
@@ -27,7 +27,7 @@ function withDefaultProject(args, boundRef, toolName) {
     return { ...args, projectId: boundRef };
 }
 async function resolveLocalPath(toolName, args, cwd) {
-    if (toolName !== "atlas_file")
+    if (toolName !== "atlas_write")
         return args;
     const localPath = args.localPath;
     if (typeof localPath !== "string" || !localPath.trim())
@@ -37,6 +37,11 @@ async function resolveLocalPath(toolName, args, cwd) {
     return { ...rest, content };
 }
 function toMcpContent(result) {
+    if (result && typeof result === "object" && "format" in result && "body" in result) {
+        const r = result;
+        const footer = r.meta ? `\n\n---\n${JSON.stringify(r.meta)}` : "";
+        return { content: [{ type: "text", text: `${r.body}${footer}` }] };
+    }
     return {
         content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result, null, 2) }],
     };

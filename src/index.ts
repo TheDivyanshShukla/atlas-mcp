@@ -7,7 +7,7 @@ import { loadConfig } from "./config.js";
 import { AtlasClient } from "./client.js";
 
 /** Thin local bridge — tool catalog and handlers live on the Atlas server (auto-sync on every connect). */
-export const CLIENT_VERSION = "0.2.0";
+export const CLIENT_VERSION = "0.4.0";
 
 const dynamicInput = z.object({}).passthrough();
 const NO_PROJECT_DEFAULT = new Set(["atlas_whoami", "atlas_list_projects", "atlas_create_project", "atlas_log_work"]);
@@ -40,7 +40,7 @@ async function resolveLocalPath(
   args: Record<string, unknown>,
   cwd: string,
 ): Promise<Record<string, unknown>> {
-  if (toolName !== "atlas_file") return args;
+  if (toolName !== "atlas_write") return args;
   const localPath = args.localPath;
   if (typeof localPath !== "string" || !localPath.trim()) return args;
   const content = await readLocalFile(cwd, localPath);
@@ -49,6 +49,11 @@ async function resolveLocalPath(
 }
 
 function toMcpContent(result: unknown) {
+  if (result && typeof result === "object" && "format" in result && "body" in result) {
+    const r = result as { format: string; body: string; meta?: Record<string, unknown> };
+    const footer = r.meta ? `\n\n---\n${JSON.stringify(r.meta)}` : "";
+    return { content: [{ type: "text" as const, text: `${r.body}${footer}` }] };
+  }
   return {
     content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result, null, 2) }],
   };

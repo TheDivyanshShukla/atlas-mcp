@@ -135,70 +135,63 @@ async function apiFetch<T>(baseUrl: string, key: string, path: string, init?: Re
   }
 }
 
-/** Resolve the project to bind: pick existing / custom / folder; offer to create if missing. */
-async function resolveProject(baseUrl: string, key: string | undefined, folder: string): Promise<string> {
-  const flag = arg("project");
-  if (flag) return flag;
+/** Look up by name; link if exists, else ask and create. Returns canonical project name. */
+async function ensureProjectLinked(baseUrl: string, key: string | undefined, projectName: string): Promise<string> {
+  const name = projectName.trim();
+  if (!name) throw new Error("Project name is required");
 
-  const interactive = process.stdin.isTTY && !process.env.CI;
-  // need a key to list/create; without one, just default to the folder name
   if (!key) {
-    if (!interactive) return folder;
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const ans = (await rl.question(`Project name for this repo [${folder}]: `)).trim();
-    rl.close();
-    return ans || folder;
+    out(`\nLinked to project "${name}" locally — set ATLAS_MCP_KEY to verify or create on Atlas.`);
+    return name;
   }
 
   const who = await apiFetch<{ projects: { id: string; name: string }[] }>(baseUrl, key, "/api/v1/projects");
   const projects = who?.projects ?? [];
+  const match = projects.find((p) => p.name.toLowerCase() === name.toLowerCase());
 
+  if (match) {
+    out(`\n✓ Linked to existing Atlas project "${match.name}"`);
+    return match.name;
+  }
+
+  const interactive = process.stdin.isTTY && !process.env.CI;
   if (!interactive) {
-    // non-interactive: reuse a same-named project if it exists, else the folder name
-    const match = projects.find((p) => p.name.toLowerCase() === folder.toLowerCase());
-    return match?.name ?? folder;
+    out(`\n· Project "${name}" not found in Atlas (non-interactive). Create it in the app or re-run in a terminal.`);
+    return name;
   }
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  out(`\nWhich Atlas project should this repo map to?`);
-  projects.forEach((p, i) => out(`  ${i + 1}) ${p.name}`));
-  out(`  n) New project (named "${folder}")`);
-  out(`  or type a custom name`);
-  const ans = (await rl.question(`> `)).trim();
-
-  let chosen: string;
-  const num = Number(ans);
-  if (ans === "" || ans.toLowerCase() === "n") chosen = folder;
-  else if (Number.isInteger(num) && num >= 1 && num <= projects.length) chosen = projects[num - 1].name;
-  else chosen = ans;
-
-  // create-if-missing, with confirmation
-  const exists = projects.some((p) => p.name.toLowerCase() === chosen.toLowerCase());
-  if (!exists) {
-    const yn = (await rl.question(`Project "${chosen}" doesn't exist in Atlas. Create it? [Y/n] `)).trim().toLowerCase();
-    if (yn === "" || yn === "y" || yn === "yes") {
-      const created = await apiFetch<{ id: string; name: string }>(baseUrl, key, "/api/v1/projects", {
-        method: "POST",
-        body: JSON.stringify({ name: chosen }),
-      });
-      if (created) out(`  ✓ Created project "${created.name}"`);
-      else out(`  · Could not create (key may lack projects:write) — binding by name anyway; create it in Atlas.`);
-    }
-  }
+  const yn = (await rl.question(`Project "${name}" doesn't exist in Atlas. Create it? [Y/n] `)).trim().toLowerCase();
   rl.close();
-  return chosen;
+
+  if (yn !== "" && yn !== "y" && yn !== "yes") {
+    out(`\n· Skipped create — binding this repo to "${name}" anyway (create the project in Atlas when ready).`);
+    return name;
+  }
+
+  const created = await apiFetch<{ id: string; name: string }>(baseUrl, key, "/api/v1/projects", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+  if (created) {
+    out(`  ✓ Created project "${created.name}" and linked this repo`);
+    return created.name;
+  }
+  out(`  · Could not create (check key has projects:write) — binding by name anyway.`);
+  return name;
 }
 
 async function globalInstall(opts: { cursorOnly?: boolean } = {}) {
   const key = arg("key") || process.env.ATLAS_MCP_KEY;
   const baseUrl = (arg("base-url") || process.env.ATLAS_BASE_URL || "https://atlas.naravirtual.in").replace(/\/$/, "");
   const token = key?.trim() || "${ATLAS_MCP_KEY}";
+  const folder = process.cwd().split(/[\\/]/).filter(Boolean).pop() || "general";
+  const flagProject = arg("project");
 
-  let project = arg("project");
-  if (!project && key) {
-    const folder = process.cwd().split(/[\\/]/).filter(Boolean).pop() || "general";
-    project = await resolveProject(baseUrl, key, folder);
-  }
+  let project: string;
+  if (flagProject) project = await ensureProjectLinked(baseUrl, key, flagProject);
+  else if (key) project = await ensureProjectLinked(baseUrl, key, folder);
+  else project = folder;
 
   out(`\nGlobal Atlas MCP install (machine-wide, not per-repo):`);
 
@@ -239,16 +232,17 @@ async function bindRepo() {
   const flagProject = arg("project");
 
   let project: string;
-  if (flagProject) project = flagProject;
-  else if (typeof existing.project === "string" && existing.project.trim()) {
+  if (flagProject) {
+    project = await ensureProjectLinked(baseUrl, key, flagProject);
+  } else if (typeof existing.project === "string" && existing.project.trim()) {
     project = existing.project;
-    out(`\nKeeping existing .atlas binding: ${project}`);
+    out(`\nAlready linked to "${project}" (.atlas). Pass --project <name> to change.`);
   } else {
-    project = await resolveProject(baseUrl, key, folder);
+    project = await ensureProjectLinked(baseUrl, key, folder);
   }
 
   writeRepoDotAtlas(project, existing);
-  out(`\nWrote .atlas (project: ${project}) — optional repo override; global config is ~/.atlas/config.json`);
+  out(`\nWrote .atlas → project "${project}"`);
   out(`IDE MCP is machine-wide — run: npx -y ${GITHUB_PKG} install --key $ATLAS_MCP_KEY --project ${project}\n`);
 }
 
@@ -325,6 +319,7 @@ function showHelp() {
   out(`    → Cursor, Claude Code, Windsurf, VS Code, Copilot CLI + ~/.atlas/config.json\n`);
   out(`  npx -y ${GITHUB_PKG} cursor-install --key atlas_mcp_… --project Nara   Cursor only\n`);
   out(`Optional per-repo override (not required for MCP):\n`);
+  out(`  atlas . [--project Name]   link repo; creates project if missing (uses folder name by default)`);
   out(`  npx -y ${GITHUB_PKG} bind --project foo   writes ./.atlas only\n`);
   out(`Other:\n`);
   out(`  atlas hooks install     Claude Code auto-capture hooks (per repo)`);

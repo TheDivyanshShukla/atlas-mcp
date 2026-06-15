@@ -16,13 +16,13 @@ This puts **`atlas`** on your PATH — repo setup, hooks, and the stdio MCP serv
 ## One-command setup
 
 ```bash
-# in your repo root
+# in your repo root — uses folder name as project; creates if missing
 atlas .
-# or: atlas . --project <atlas-project-slug>
+# or pin a specific Atlas project by name:
+atlas . --project Conference
 ```
 
-This writes a `.atlas` marker (safe to commit) and adds the Atlas MCP server to every agent config it
-finds (`.mcp.json` for Claude Code, `~/.cursor/mcp.json`, Windsurf, `.vscode/mcp.json`).
+Requires `ATLAS_MCP_KEY` in your environment (or pass `--key`). If the project exists, you get linked immediately; if not, Atlas asks to create it.
 
 Then create an **MCP key** in Atlas → Settings → API keys → *MCP key* (pick toolsets, read-only, expiry),
 and export it:
@@ -40,8 +40,8 @@ atlas hooks install
 
 ## What it exposes (scope-gated — tools you can't use are hidden)
 
-- **context**: `atlas_context` (one-call prompts+docs bundle), `atlas_search`, `atlas_list_prompts`,
-  `atlas_get_secret` (audited decrypted .env values — use instead of pasting creds).
+- **context**: `atlas_browse`, `atlas_read`, `atlas_search`, `atlas_context`, `atlas_get_secret`.
+- **write**: `atlas_write` (replace/append/delete; stdio supports `localPath`).
 - **capture**: `atlas_log_work` (records summary + prompt + changed files), `atlas_save_prompt`.
 - **tasks**: `atlas_list_tasks`, `atlas_create_task`.
 
